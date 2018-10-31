@@ -1,6 +1,16 @@
 local ffi = require "ffi"
 local lpeg = require "lpeg"
 
+
+ffi.cdef[[
+int utf16_to_utf8(const char *src, size_t srclen, char *buf, size_t *buflen);
+]]
+
+
+local ffi_new = ffi.new
+local ffi_cast = ffi.cast
+local ffi_str = ffi.string
+
 local rawset = rawset
 local tonumber = tonumber
 local string_sub = string.sub
@@ -47,11 +57,45 @@ local function tonum(sign, s, typ, base)
     n = uint64(s, base)
 
     if neg then
-        n = -ffi.cast("int64_t", n)
+        n = -ffi_cast("int64_t", n)
         return n > int_lower and tonumber(n) or n
     end
 
     return n < int_upper and tonumber(n) or n
+end
+
+
+local function find_shared_obj(cpath, so_name)
+    local io, string = io, string
+    for k in string.gmatch(cpath, "[^;]+") do
+        local so_path = string.match(k, "(.*/)")
+        so_path = so_path .. so_name
+
+        -- Don't get me wrong, the only way to know if a file exist is trying
+        -- to open it.
+        local f = io.open(so_path)
+        if f ~= nil then
+            io.close(f)
+            return so_path
+        end
+    end
+end
+
+
+local buflen = ffi_new("size_t[1]", 0)
+local utf8 = ffi.load(find_shared_obj(package.cpath, "libutf8.so"))
+
+
+local function toutf8(s)
+    local len = #s
+    local buf = ffi_new("char[?]", len)
+
+    buflen[0] = len
+
+    local rc = utf8.utf16_to_utf8(s, #s, buf, buflen)
+    if rc == 0 then
+        return ffi_str(buf, buflen[0])
+    end
 end
 
 
@@ -63,19 +107,18 @@ local function D(patt, sep) return (patt * (sep * patt)^0)^-1 end
 
 local digit = lpeg.digit  -- R("09")
 local xdigit = lpeg.xdigit  -- R("09", "AF", "af")
-local escaped = P"\\" *
-    ( P"a" / "\a"
-    + P"b" / "\b"
-    + P"f" / "\f"
-    + P"n" / "\n"
-    + P"r" / "\r"
+local esc_seq = P"\\" *
+    ( P"b" / "\b"
     + P"t" / "\t"
-    + P"v" / "\v"
-    + P"u" / "\\u"  -- TODO: utf8
+    + P"n" / "\n"
+    + P"f" / "\f"
+    + P"r" / "\r"
     + C(S"\\\"/")
     + digit * digit^-2 / tonumber / string_char
     + S"xX" * C(xdigit * xdigit) * Cc(16) / tonumber / string_char
     )
+local unicode = (P"\\u" * xdigit^4)^1 / toutf8
+local escaped = esc_seq + unicode
 local unescaped = C((P(1) - S'\\"')^1)
 local qstring = P'"' * Ct((unescaped + escaped)^0) * P'"' / tbl_concat
 
