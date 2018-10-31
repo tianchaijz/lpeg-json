@@ -88,60 +88,76 @@ static int codepoint_to_utf8(char *utf8, int codepoint)
  * Returns: 0   success
  *          -1  error
  */
-static int json_append_unicode_escape(json_parse_t *json)
+int utf16_to_utf8(const char *src, size_t srclen, char *buf, size_t *buflen)
 {
     char utf8[4];       /* Surrogate pairs require 4 UTF-8 bytes */
-    int codepoint;
-    int surrogate_low;
-    int len;
-    int escape_len = 6;
+    size_t bufsize = *buflen, pos = 0;
+    int codepoint, surrogate_low, len, escape_len;
+    const char *end = src + srclen, *p;
 
-    /* Fetch UTF-16 code unit */
-    codepoint = decode_hex4(json->ptr + 2);
-    if (codepoint < 0)
-        return -1;
+    for (p = src; p + 6 <= end && p[0] == '\\' && p[1] == 'u';) {
+        escape_len = 6;
 
-    /* UTF-16 surrogate pairs take the following 2 byte form:
-     *      11011 x yyyyyyyyyy
-     * When x = 0: y is the high 10 bits of the codepoint
-     *      x = 1: y is the low 10 bits of the codepoint
-     *
-     * Check for a surrogate pair (high or low) */
-    if ((codepoint & 0xF800) == 0xD800) {
-        /* Error if the 1st surrogate is not high */
-        if (codepoint & 0x400)
-            return -1;
-
-        /* Ensure the next code is a unicode escape */
-        if (*(json->ptr + escape_len) != '\\' ||
-            *(json->ptr + escape_len + 1) != 'u') {
-            return -1;
+        /* Fetch UTF-16 code unit */
+        codepoint = decode_hex4(p + 2);
+        if (codepoint < 0) {
+            return __LINE__;
         }
 
-        /* Fetch the next codepoint */
-        surrogate_low = decode_hex4(json->ptr + 2 + escape_len);
-        if (surrogate_low < 0)
-            return -1;
+        /* UTF-16 surrogate pairs take the following 2 byte form:
+         *      11011 x yyyyyyyyyy
+         * When x = 0: y is the high 10 bits of the codepoint
+         *      x = 1: y is the low 10 bits of the codepoint
+         *
+         * Check for a surrogate pair (high or low) */
+        if ((codepoint & 0xF800) == 0xD800) {
+            /* Error if the 1st surrogate is not high */
+            if (codepoint & 0x400) {
+                return __LINE__;
+            }
 
-        /* Error if the 2nd code is not a low surrogate */
-        if ((surrogate_low & 0xFC00) != 0xDC00)
-            return -1;
+            /* Ensure the next code is a unicode escape */
+            if (p + 12 > end ||
+                *(p + escape_len) != '\\' ||
+                *(p + escape_len + 1) != 'u') {
+                return __LINE__;
+            }
 
-        /* Calculate Unicode codepoint */
-        codepoint = (codepoint & 0x3FF) << 10;
-        surrogate_low &= 0x3FF;
-        codepoint = (codepoint | surrogate_low) + 0x10000;
-        escape_len = 12;
+            /* Fetch the next codepoint */
+            surrogate_low = decode_hex4(p + 2 + escape_len);
+            if (surrogate_low < 0) {
+                return __LINE__;
+            }
+
+            /* Error if the 2nd code is not a low surrogate */
+            if ((surrogate_low & 0xFC00) != 0xDC00) {
+                return __LINE__;
+            }
+
+            /* Calculate Unicode codepoint */
+            codepoint = (codepoint & 0x3FF) << 10;
+            surrogate_low &= 0x3FF;
+            codepoint = (codepoint | surrogate_low) + 0x10000;
+            escape_len = 12;
+        }
+
+        /* Convert codepoint to UTF-8 */
+        len = codepoint_to_utf8(utf8, codepoint);
+        if (len == 0) {
+            return __LINE__;
+        }
+
+        pos += len;
+
+        if (pos > bufsize) {
+            return __LINE__;
+        }
+
+        buf = (char *) memcpy(buf, utf8, len) + len;
+        p += escape_len;
     }
 
-    /* Convert codepoint to UTF-8 */
-    len = codepoint_to_utf8(utf8, codepoint);
-    if (!len)
-        return -1;
-
-    /* Append bytes and advance parse index */
-    strbuf_append_mem_unsafe(json->tmp, utf8, len);
-    json->ptr += escape_len;
+    *buflen = pos;
 
     return 0;
 }
