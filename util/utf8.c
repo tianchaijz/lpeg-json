@@ -92,12 +92,10 @@ int utf16_to_utf8(const char *src, size_t srclen, char *buf, size_t *buflen)
 {
     char utf8[4];       /* Surrogate pairs require 4 UTF-8 bytes */
     size_t bufsize = *buflen, pos = 0;
-    int codepoint, surrogate_low, len, escape_len;
+    int codepoint, surrogate_low, len;
     const char *end = src + srclen, *p;
 
-    for (p = src; p + 6 <= end && p[0] == '\\' && p[1] == 'u';) {
-        escape_len = 6;
-
+    for (p = src; p + 6 <= end && p[0] == '\\' && p[1] == 'u'; p += 6) {
         /* Fetch UTF-16 code unit */
         codepoint = decode_hex4(p + 2);
         if (codepoint < 0) {
@@ -116,15 +114,15 @@ int utf16_to_utf8(const char *src, size_t srclen, char *buf, size_t *buflen)
                 return __LINE__;
             }
 
+            p += 6;
+
             /* Ensure the next code is a unicode escape */
-            if (p + 12 > end ||
-                *(p + escape_len) != '\\' ||
-                *(p + escape_len + 1) != 'u') {
+            if (p + 6 > end || p[0] != '\\' || p[1] != 'u') {
                 return __LINE__;
             }
 
             /* Fetch the next codepoint */
-            surrogate_low = decode_hex4(p + 2 + escape_len);
+            surrogate_low = decode_hex4(p + 2);
             if (surrogate_low < 0) {
                 return __LINE__;
             }
@@ -138,7 +136,6 @@ int utf16_to_utf8(const char *src, size_t srclen, char *buf, size_t *buflen)
             codepoint = (codepoint & 0x3FF) << 10;
             surrogate_low &= 0x3FF;
             codepoint = (codepoint | surrogate_low) + 0x10000;
-            escape_len = 12;
         }
 
         /* Convert codepoint to UTF-8 */
@@ -154,7 +151,6 @@ int utf16_to_utf8(const char *src, size_t srclen, char *buf, size_t *buflen)
         }
 
         buf = (char *) memcpy(buf, utf8, len) + len;
-        p += escape_len;
     }
 
     *buflen = pos;
