@@ -83,16 +83,17 @@ end
 
 
 local buflen = ffi_new("size_t[1]", 0)
-local utf8 = ffi.load(find_shared_obj(package.cpath, "libutf8.so"))
+local vla_char_type = ffi.typeof("char[?]")
+local libutf8 = ffi.load(find_shared_obj(package.cpath, "libutf8.so"))
 
 
 local function toutf8(s)
     local len = #s
-    local buf = ffi_new("char[?]", len)
+    local buf = ffi_new(vla_char_type, len)
 
     buflen[0] = len
 
-    local rc = utf8.utf16_to_utf8(s, #s, buf, buflen)
+    local rc = libutf8.utf16_to_utf8(s, len, buf, buflen)
     if rc == 0 then
         return ffi_str(buf, buflen[0])
     end
