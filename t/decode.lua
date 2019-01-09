@@ -66,7 +66,7 @@ block.nonce = tostring(block.nonce)
 
 local block_top_s = cjson.encode(block)
 
-assert(block.nonce == "6405970277170687609ULL")
+assert(block.nonce == "6405970277170687609LL")
 
 
 test_decode(block)
@@ -130,6 +130,10 @@ for _, f in ipairs(files) do
     print(f)
     test_decode_s(s)
 end
+
+
+local n = "16156557666998568266"
+assert(json.decode(n) == 16156557666998568266ULL)
 
 
 print("OK")
